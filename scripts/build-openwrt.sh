@@ -2,22 +2,19 @@
 set -e
 
 # 获取版本号
-VERSION=${1:-$(date +'%Y%m%d')}
+VERSION=${1:-snapshot}
 BUILD_DIR="$HOME/openwrt_build"
-REPO_DIR="$PWD"
+REPO_DIR=$(pwd)
 
 echo "=== 开始内存优化编译 (版本: $VERSION) ==="
 
-# 1. 配置环境
+# 配置环境
 export FORCE_UNSAFE_CONFIGURE=1
-export CCACHE_DIR="$HOME/.ccache"
+[ -z "$CCACHE_DIR" ] && export CCACHE_DIR="$HOME/.ccache"
 export CCACHE_MAXSIZE="2G"
 mkdir -p "$CCACHE_DIR"
 
-# 2. 进入源码目录
-cd "$REPO_DIR"
-
-# 3. 应用内存优化配置
+# 应用内存优化配置
 cat > .config << 'EOF'
 CONFIG_TARGET_qualcommax_ipq60xx_DEVICE_qihoo_360v6=y
 
@@ -44,14 +41,13 @@ CONFIG_PACKAGE_zram-swap=y
 CONFIG_PACKAGE_kmod-zram=y
 EOF
 
-# 4. 更新 feeds
-echo "更新 feeds..."
+# 更新 feeds
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# 5. 应用内存优化补丁
-echo "应用内存优化补丁..."
-cat > patches/memory-optimize.patch << 'EOF'
+# 应用内存优化补丁
+if [ ! -f patches/memory-optimize.patch ]; then
+  cat > patches/memory-optimize.patch << 'EOF'
 --- a/net/core/skbuff.c
 +++ b/net/core/skbuff.c
 @@ -1000,6 +1000,7 @@
@@ -61,45 +57,42 @@ cat > patches/memory-optimize.patch << 'EOF'
 +       memset(skb, 0, offsetof(struct sk_buff, tail));
  }
 EOF
-[ -f patches/memory-optimize.patch ] && patch -p1 < patches/memory-optimize.patch
+  patch -p1 < patches/memory-optimize.patch
+fi
 
-# 6. 下载依赖
-echo "下载依赖库..."
-make download -j$(nproc) || make download -j8 V=s
+# 下载依赖
+make download -j$(nproc) || make download -j4 V=s
 
-# 7. 编译固件
-echo "开始编译固件..."
-make -j$(nproc) V=s || make -j1 V=s
+# 编译固件
+make -j$(($(nproc) + 1)) V=s || make -j2 V=s
 
-# 8. 收集输出文件
+# 收集输出文件
 mkdir -p "$BUILD_DIR"
 find bin/targets -name '*.bin' -exec cp -v {} "$BUILD_DIR" \;
 
-# 9. 添加版本信息
+# 添加版本信息
 for file in "$BUILD_DIR"/*.bin; do
-    new_name="${file%.*}_MEMOPT_$VERSION.bin"
-    mv "$file" "$new_name"
-    echo "生成: $(basename "$new_name")"
+  filename=$(basename "$file")
+  extension="${filename##*.}"
+  new_name="${filename%.*}_MEMOPT_$VERSION.$extension"
+  mv "$file" "$BUILD_DIR/$new_name"
+  echo "生成: $new_name"
 done
 
-# 10. 生成报告
+# 生成报告
 cat > "$BUILD_DIR/build-report.md" << EOF
 # OpenWrt 内存优化固件报告
 **版本**: $VERSION  
 **编译时间**: $(date)  
+**Git Commit**: $(git rev-parse --short HEAD)  
 
-## 内存优化配置
-- **内核配置**: LTO + Size优化 + Slab限制
-- **服务优化**: dnsmasq → odhcpd, uhttpd → lighttpd
-- **内存压缩**: zRAM 启用
-
-## 关键参数
-\`\`\`
+## 优化配置
+\`\`\`config
 $(grep -E 'CONFIG_(SLAB|LTO|ZRAM|CACHE|TCP)' .config)
 \`\`\`
 
-## 输出文件
-$(ls -lh "$BUILD_DIR"/*.bin)
+## 包含固件
+$(ls -lh "$BUILD_DIR"/*.bin | awk '{print "- " $9 " (" $5 ")"}')
 EOF
 
 echo "=== 编译完成! 固件已保存至: $BUILD_DIR ==="

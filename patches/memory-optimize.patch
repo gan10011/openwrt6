@@ -1,0 +1,8 @@
+--- a/net/core/skbuff.c
++++ b/net/core/skbuff.c
+@@ -1000,6 +1000,7 @@
+        if (unlikely(!skb))
+                goto out;
+        prefetchw(skb);
++       memset(skb, 0, offsetof(struct sk_buff, tail));
+ }

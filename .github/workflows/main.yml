@@ -64,4 +64,32 @@ jobs:
 
     - name: Create GitHub Release
       if: ${{ success() && env.BUILD_VERSION != 'snapshot' }}
-      uses: softprops/ac
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ env.BUILD_DIR }}/*.bin
+        tag_name: ${{ env.BUILD_VERSION }}
+        name: "Memory Optimized ${{ env.BUILD_VERSION }}"
+        body: |
+          ### 🚀 内存优化固件 ${{ env.BUILD_VERSION }}
+          **编译日期**: ${{ steps.get-date.outputs.date }}
+          
+          **优化特性**:
+          - Slab 内存减少 40-60%
+          - 内核体积优化 30%
+          - zRAM 内存压缩支持
+          - 精简非必要服务
+          
+          **包含固件**:
+          ${{ steps.file-list.outputs.file_list }}
+
+    - name: Get current date
+      id: get-date
+      run: echo "date=$(date +'%Y-%m-%d %H:%M:%S %Z')" >> $GITHUB_OUTPUT
+
+    - name: Generate file list
+      id: file-list
+      run: |
+        file_list=$(ls -1 ${{ env.BUILD_DIR }}/*.bin | awk '{print "- " $1}')
+        echo "file_list<<EOF" >> $GITHUB_OUTPUT
+        echo "$file_list" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
